@@ -21,8 +21,8 @@ void create_neopixel_chain(int, int, int);
 
 Adafruit_NeoPixel strip = Adafruit_NeoPixel(STRIP_LEN, LIGHT_PIN, NEO_GRB + NEO_KHZ800);
 
-uint32_t magenta = strip.Color(255, 0, 255); //Active color These should both be temporary until we have wheel
-uint32_t light_magenta = strip.Color( 4, 0, 4 ); //Background color for off places
+uint32_t magenta = strip.Color(0, 100, 150); //Active color These should both be temporary until we have wheel
+uint32_t light_magenta = strip.Color( 20, 4, 0 ); //Background color for off places
 uint32_t green = strip.Color(0, 255, 0); //Seperator
 unsigned long adjust = 0; 
 void setup(){
@@ -66,6 +66,9 @@ void loop(){
 int get_h( unsigned long* time){
   int h = *time / (3600000);
   *time = *time - (h * 3600000);
+  while( h >= 24 ) {
+    h = h - 24; //Wrap around
+  }
   return h;
 }
 
