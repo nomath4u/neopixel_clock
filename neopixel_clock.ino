@@ -1,6 +1,6 @@
 #include <Adafruit_NeoPixel.h>
 
-#define DEBUGGING 1
+#define DEBUGGING 0
 #define DEBUG_MODE_LED 29
 
 #define LIGHT_PIN 3
@@ -16,6 +16,7 @@
 #define MSEC_IN_HOUR 3600000
 
 #define MAX_BRIGHTNESS 64 //Can go up to 255 but I'm not sure if the arduino could handle it.
+#define WHEEL_MAX 255 //All the way around the Wheel
 /**********************************
 * Function Signatures
 **********************************/
@@ -28,6 +29,10 @@ void create_neopixel_chain(int, int, int);
 void modify_time();
 void modify_brightness();
 void modify_color();
+//uint8_t Red(uint32_t color)
+//uint8_t Green(uint32_t color)
+//uint8_t Blue(uint32_t color)
+
 
 
 /**********************************
@@ -36,9 +41,18 @@ void modify_color();
 
 Adafruit_NeoPixel strip = Adafruit_NeoPixel(STRIP_LEN, LIGHT_PIN, NEO_GRB + NEO_KHZ800);
 
-uint32_t magenta = strip.Color(0, 100, 150); //Active color These should both be temporary until we have wheel
-uint32_t light_magenta = strip.Color( 20, 4, 0 ); //Background color for off places
-uint32_t green = strip.Color(0, 255, 0); //Seperator
+//uint32_t magenta = strip.Color(0, 100, 150); //Active color These should both be temporary until we have wheel
+uint32_t teal = Wheel( 150 );
+uint32_t orange = Wheel( 15 ); //Background color for off places
+uint32_t green = Wheel(85); //Seperator
+
+unsigned short time_wheel_pos = 150;
+unsigned short background_wheel_pos = 15;
+unsigned short seperator_wheel_pos = 85;
+
+uint32_t time_color = teal;
+uint32_t background_color = orange;
+uint32_t seperator_color = green;
 
 uint32_t yellow = strip.Color(255, 100, 0);
 uint32_t blue = strip.Color(0, 0, 255);
@@ -48,11 +62,31 @@ unsigned long time; //Worried about overflow
 unsigned short bright;
 
 /**********************************
+* Wheel Setup
+**********************************/
+// Input a value 0 to 255 to get a color value.
+// The colours are a transition r - g - b - back to r.
+uint32_t Wheel(byte WheelPos){
+    WheelPos = 255 - WheelPos;
+    if(WheelPos < 85){
+        return strip.Color(255 - WheelPos * 3, 0, WheelPos * 3);
+    }
+    else if(WheelPos < 170){
+        WheelPos -= 85;
+        return strip.Color(0, WheelPos * 3, 255 - WheelPos * 3);
+    }
+    else{
+        WheelPos -= 170;
+        return strip.Color(WheelPos * 3, 255 - WheelPos * 3, 0);
+    }
+}
+
+/**********************************
 * State Machine
 **********************************/
 enum { PRESS, UNPRESS };
 enum { CLOCK, UPDATE_HOUR, UPDATE_MIN, UPDATE_SEC, UPDATE_BRIGHTNESS, UPDATE_COLOR, STATE_END };
-int state_color[STATE_END] = { off, green, yellow, blue, light_magenta, magenta };
+int state_color[STATE_END] = { off, green, yellow, blue, orange, teal };
 int mode = CLOCK;
 int mode_button_state = UNPRESS;
 unsigned long adjust = 0; 
@@ -160,9 +194,9 @@ void add_seperators(){
   #define NUM_HOUR 5
   #define NUM_MINUTE (NUM_HOUR + 6 +1)
   #define NUM_SEC ( NUM_MINUTE + 6 +1 )
-  strip.setPixelColor(NUM_HOUR, green);
-  strip.setPixelColor(NUM_MINUTE, green);
-  strip.setPixelColor(NUM_SEC, green);
+  strip.setPixelColor(NUM_HOUR, seperator_color);
+  strip.setPixelColor(NUM_MINUTE, seperator_color);
+  strip.setPixelColor(NUM_SEC, seperator_color);
 }
 
 void add_h(int h){
@@ -172,9 +206,9 @@ void add_h(int h){
     if( h >= (1 << i) ){
       h = h - ( 1<< i );
       //leds[i] = 1;
-      strip.setPixelColor((i + HOUR_SHIFT), magenta);
+      strip.setPixelColor((i + HOUR_SHIFT), time_color);
     } else {
-      strip.setPixelColor(( i + HOUR_SHIFT), light_magenta);
+      strip.setPixelColor(( i + HOUR_SHIFT), background_color);
     }
   }
   
@@ -187,9 +221,9 @@ void add_m(int m){
     if( m >= (1 << i) ){
       m = m - ( 1<< i );
       //leds[i] = 1;
-      strip.setPixelColor((i + MIN_SHIFT), magenta);
+      strip.setPixelColor((i + MIN_SHIFT), time_color);
     } else {
-      strip.setPixelColor(( i + MIN_SHIFT), light_magenta);
+      strip.setPixelColor(( i + MIN_SHIFT), background_color);
     }
   }
 }
@@ -201,9 +235,9 @@ void add_second(int sec){
     if( sec >= (1 << i) ){
       sec = sec - ( 1<< i );
       //leds[i] = 1;
-      strip.setPixelColor((i + SEC_SHIFT), magenta);
+      strip.setPixelColor((i + SEC_SHIFT), time_color);
     } else {
-      strip.setPixelColor(( i + SEC_SHIFT), light_magenta);
+      strip.setPixelColor(( i + SEC_SHIFT), background_color);
     }
   }
 }
@@ -251,8 +285,25 @@ void modify_time(boolean b){
   }
 }
 
+/*Assumes starting colors are nicely spaced on the color wheel*/
 void modify_color(){
-  //Stubbed
+  if(!digitalRead(ADJUST_PIN)){
+    time_wheel_pos++;
+    background_wheel_pos++;
+    seperator_wheel_pos++;
+    if(time_wheel_pos > WHEEL_MAX){
+      time_wheel_pos = 0;
+    }
+    if(background_wheel_pos > WHEEL_MAX){
+      background_wheel_pos = 0;
+    }
+    if( seperator_wheel_pos > WHEEL_MAX){
+      seperator_wheel_pos = 0;
+    }
+    time_color = Wheel(time_wheel_pos);
+    background_color = Wheel(background_wheel_pos);
+    seperator_color = Wheel(seperator_wheel_pos);
+  } 
 }
 
 void blink_section(boolean b){
@@ -281,6 +332,7 @@ void blink_section(boolean b){
   }
 }
 
+/*Consider using DimColor function. Haven't looked for it in code but adafruit mentions it*/
 void modify_brightness(){
   if(!digitalRead(ADJUST_PIN)){
     bright--;
