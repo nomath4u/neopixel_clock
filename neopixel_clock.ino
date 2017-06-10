@@ -14,6 +14,8 @@
 #define MSEC_IN_SEC 1000
 #define MSEC_IN_MIN 60000
 #define MSEC_IN_HOUR 3600000
+
+#define MAX_BRIGHTNESS 64 //Can go up to 255 but I'm not sure if the arduino could handle it.
 /**********************************
 * Function Signatures
 **********************************/
@@ -43,7 +45,7 @@ uint32_t blue = strip.Color(0, 0, 255);
 uint32_t off = strip.Color(0, 0, 0);
 
 unsigned long time; //Worried about overflow
-
+unsigned short bright;
 
 /**********************************
 * State Machine
@@ -55,15 +57,22 @@ int mode = CLOCK;
 int mode_button_state = UNPRESS;
 unsigned long adjust = 0; 
 void setup(){
+  /********************
+  * Setup Pins
+  ********************/
   pinMode(LIGHT_PIN, OUTPUT);
   pinMode(ADJUST_PIN, INPUT);
   pinMode(MODE_PIN, INPUT);
   digitalWrite(ADJUST_PIN, HIGH); //Internal pull up
   digitalWrite(MODE_PIN, HIGH);
-  //Neopixel init
+  
+  /********************
+  * Setup Neopixels
+  ********************/
+  bright = MAX_BRIGHTNESS;
   strip.begin();
   strip.show(); //Initialize everything off
-  strip.setBrightness(64); //Current limiting
+  strip.setBrightness(bright); //Current limiting
   Serial.begin(9600);
   //delay(3000); //Wait for timer to get going?
 }
@@ -242,10 +251,6 @@ void modify_time(boolean b){
   }
 }
 
-void modify_brightness(){
-  //Stubbed
-}
-
 void modify_color(){
   //Stubbed
 }
@@ -273,5 +278,15 @@ void blink_section(boolean b){
         break;
       //Shouldn't ever happen. This would be confusing
     }
+  }
+}
+
+void modify_brightness(){
+  if(!digitalRead(ADJUST_PIN)){
+    bright--;
+    if (bright > MAX_BRIGHTNESS ) { //Checking for underflow on unsigned value
+      bright = MAX_BRIGHTNESS;
+    }
+    strip.setBrightness(bright);
   }
 }
