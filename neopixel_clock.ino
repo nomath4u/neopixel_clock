@@ -29,9 +29,10 @@ void create_neopixel_chain(int, int, int);
 void modify_time();
 void modify_brightness();
 void modify_color();
-//uint8_t Red(uint32_t color)
-//uint8_t Green(uint32_t color)
-//uint8_t Blue(uint32_t color)
+uint8_t Red(uint32_t color);
+uint8_t Green(uint32_t color);
+uint8_t Blue(uint32_t color);
+uint32_t DimBackgroundColor(uint32_t color);
 
 
 
@@ -208,7 +209,7 @@ void add_h(int h){
       //leds[i] = 1;
       strip.setPixelColor((i + HOUR_SHIFT), time_color);
     } else {
-      strip.setPixelColor(( i + HOUR_SHIFT), background_color);
+      strip.setPixelColor(( i + HOUR_SHIFT), DimBackgroundColor(background_color));
     }
   }
   
@@ -223,7 +224,7 @@ void add_m(int m){
       //leds[i] = 1;
       strip.setPixelColor((i + MIN_SHIFT), time_color);
     } else {
-      strip.setPixelColor(( i + MIN_SHIFT), background_color);
+      strip.setPixelColor(( i + MIN_SHIFT), DimBackgroundColor(background_color));
     }
   }
 }
@@ -237,7 +238,7 @@ void add_second(int sec){
       //leds[i] = 1;
       strip.setPixelColor((i + SEC_SHIFT), time_color);
     } else {
-      strip.setPixelColor(( i + SEC_SHIFT), background_color);
+      strip.setPixelColor(( i + SEC_SHIFT), DimBackgroundColor(background_color));
     }
   }
 }
@@ -342,3 +343,27 @@ void modify_brightness(){
     strip.setBrightness(bright);
   }
 }
+
+    // Returns the Red component of a 32-bit color
+    uint8_t Red(uint32_t color)
+    {
+        return (color >> 16) & 0xFF;
+    }
+
+    // Returns the Green component of a 32-bit color
+    uint8_t Green(uint32_t color)
+    {
+        return (color >> 8) & 0xFF;
+    }
+
+    // Returns the Blue component of a 32-bit color
+    uint8_t Blue(uint32_t color)
+    {
+              return color & 0xFF;
+    }
+
+    uint32_t DimBackgroundColor(uint32_t color)
+    {
+        uint32_t dimColor = strip.Color(Red(color) >> 3, Green(color) >> 3, Blue(color) >> 3);
+        return dimColor;
+    }
