@@ -1,11 +1,19 @@
 #include <Adafruit_NeoPixel.h>
 
+#define DEBUGGING 1
+#define DEBUG_MODE_LED 29
+
 #define LIGHT_PIN 3
+#define MODE_PIN 4
 #define STRIP_LEN 30
 #define HOUR_SHIFT 0
 #define MIN_SHIFT 6
 #define SEC_SHIFT MIN_SHIFT + 7
 #define ADJUST_PIN 10
+
+#define MSEC_IN_SEC 1000
+#define MSEC_IN_MIN 60000
+#define MSEC_IN_HOUR 3600000
 /**********************************
 * Function Signatures
 **********************************/
@@ -13,7 +21,12 @@
 int get_h(long*);
 int get_m(long*);
 int get_se(long*);
+void modify_by_mode();
 void create_neopixel_chain(int, int, int);
+void modify_time();
+void modify_brightness();
+void modify_color();
+
 
 /**********************************
 * NeoPixel Setup
@@ -24,11 +37,29 @@ Adafruit_NeoPixel strip = Adafruit_NeoPixel(STRIP_LEN, LIGHT_PIN, NEO_GRB + NEO_
 uint32_t magenta = strip.Color(0, 100, 150); //Active color These should both be temporary until we have wheel
 uint32_t light_magenta = strip.Color( 20, 4, 0 ); //Background color for off places
 uint32_t green = strip.Color(0, 255, 0); //Seperator
+
+uint32_t yellow = strip.Color(255, 100, 0);
+uint32_t blue = strip.Color(0, 0, 255);
+uint32_t off = strip.Color(0, 0, 0);
+
+unsigned long time; //Worried about overflow
+
+
+/**********************************
+* State Machine
+**********************************/
+enum { PRESS, UNPRESS };
+enum { CLOCK, UPDATE_HOUR, UPDATE_MIN, UPDATE_SEC, UPDATE_BRIGHTNESS, UPDATE_COLOR, STATE_END };
+int state_color[STATE_END] = { off, green, yellow, blue, light_magenta, magenta };
+int mode = CLOCK;
+int mode_button_state = UNPRESS;
 unsigned long adjust = 0; 
 void setup(){
   pinMode(LIGHT_PIN, OUTPUT);
   pinMode(ADJUST_PIN, INPUT);
+  pinMode(MODE_PIN, INPUT);
   digitalWrite(ADJUST_PIN, HIGH); //Internal pull up
+  digitalWrite(MODE_PIN, HIGH);
   //Neopixel init
   strip.begin();
   strip.show(); //Initialize everything off
@@ -37,16 +68,19 @@ void setup(){
   //delay(3000); //Wait for timer to get going?
 }
 void loop(){
-  unsigned long time; //Worried about overflow
+  
   int sec;
   int m;
   int h;
-  if(!digitalRead(ADJUST_PIN)){//Active low
-    adjust = adjust + 60000;
-  }
+  static boolean blnk = 0; //Blnk counter
+  blnk = !blnk; //Blink it
+  //if(!digitalRead(ADJUST_PIN)){//Active low
+  //  adjust = adjust + 60000;
+  //}
   //Get the time in msec
   time = millis(); //Overflows after 50 days :(
   time = time + adjust;
+  
   //Serial.println(time);
   h = get_h(&time);
   m = get_m(&time);
@@ -56,16 +90,34 @@ void loop(){
   //Serial.println(sec);
   //Serial.println();
   //Serial.println();
+  if(!digitalRead(MODE_PIN)){//Active Low //Works but poorly, should be made to interrupt
+    if(mode_button_state == UNPRESS){
+      mode = mode + 1;
+      mode_button_state = PRESS;
+      if(mode >= STATE_END){ mode = CLOCK; }
+    }
+  } else {
+    mode_button_state = UNPRESS;
+  }
+  
+  
+  
+  
   strip.clear();
   create_neopixel_chain(h,m,sec);
+  if(DEBUGGING){
+      strip.setPixelColor(DEBUG_MODE_LED, state_color[mode]);
+  }
+  modify_by_mode(blnk);
+  
   strip.show();
   delay(100); //Can save power here but probably need to wake up more than once per second.
   
 }
 
 int get_h( unsigned long* time){
-  int h = *time / (3600000);
-  *time = *time - (h * 3600000);
+  int h = *time / (MSEC_IN_HOUR);
+  *time = *time - (h * MSEC_IN_HOUR);
   while( h >= 24 ) {
     h = h - 24; //Wrap around
   }
@@ -73,16 +125,16 @@ int get_h( unsigned long* time){
 }
 
 int get_m(unsigned long* time){
-  int m = *time / (60000);
+  int m = *time / (MSEC_IN_MIN);
   //Serial.print("Minute: ");
   //Serial.println(m);
-  *time = *time - (m * 60000);
+  *time = *time - (m * MSEC_IN_MIN);
   return m;
 }
 
 int get_sec(unsigned long* time){
-  int sec = *time / (1000 );
-  *time = *time - (sec * 1000);
+  int sec = *time / (MSEC_IN_SEC );
+  *time = *time - (sec * MSEC_IN_SEC);
   return sec;
 }
 
@@ -143,6 +195,83 @@ void add_second(int sec){
       strip.setPixelColor((i + SEC_SHIFT), magenta);
     } else {
       strip.setPixelColor(( i + SEC_SHIFT), light_magenta);
+    }
+  }
+}
+
+void modify_by_mode(boolean blnk){
+  switch(mode){
+    case CLOCK:
+      break;
+    case UPDATE_HOUR:
+    case UPDATE_MIN:
+    case UPDATE_SEC:
+      modify_time(blnk);
+      break;
+    case UPDATE_BRIGHTNESS:
+      modify_brightness();
+      break;
+    case UPDATE_COLOR:
+      modify_color();
+      break;
+  }
+}
+
+void modify_time(boolean b){
+  static boolean adjust_pressed = UNPRESS;
+  blink_section(b);
+  if(!digitalRead(ADJUST_PIN)){
+    if( adjust_pressed == UNPRESS ){    
+      switch( mode ){
+        case UPDATE_HOUR:
+          adjust += MSEC_IN_HOUR;
+          break;
+        case UPDATE_MIN:
+          adjust += MSEC_IN_MIN;
+          break;
+        case UPDATE_SEC:
+          adjust += MSEC_IN_SEC;
+          break;
+        default://This shouldn't happen it wouldn't make any sense
+        break;
+      }
+    }
+    adjust_pressed = PRESS;
+  } else {
+    adjust_pressed = UNPRESS;
+  }
+}
+
+void modify_brightness(){
+  //Stubbed
+}
+
+void modify_color(){
+  //Stubbed
+}
+
+void blink_section(boolean b){
+  int i;
+  if(b){
+    switch( mode ){
+      case UPDATE_HOUR:
+        for( i = HOUR_SHIFT; i < MIN_SHIFT-1; i++){
+          strip.setPixelColor(i, off);
+        }
+        break;
+      case UPDATE_MIN:
+        for( i = MIN_SHIFT; i < SEC_SHIFT-1; i++){
+          strip.setPixelColor(i, off);
+        }
+        break;
+      case UPDATE_SEC:
+        for( i = SEC_SHIFT; i < SEC_SHIFT + 7; i++){
+          strip.setPixelColor(i,off);
+        }
+        break;
+      default:
+        break;
+      //Shouldn't ever happen. This would be confusing
     }
   }
 }
