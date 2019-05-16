@@ -1,15 +1,27 @@
 #include <Adafruit_NeoPixel.h>
+#include <ESP8266WiFi.h>
+#include <time.h>                       // time() ctime()
+#include <sys/time.h>                   // struct timeval
+#include <coredecls.h>                  // settimeofday_cb()
+#include "ssid.h" //Needs to be created locally
+
 
 #define DEBUGGING 0
 #define DEBUG_MODE_LED 29
 
-#define LIGHT_PIN 3
+#define LIGHT_PIN D8
 #define MODE_PIN 4
 #define STRIP_LEN 30
 #define HOUR_SHIFT 0
 #define MIN_SHIFT 6
 #define SEC_SHIFT MIN_SHIFT + 7
 #define ADJUST_PIN 10
+
+#define TZ  -8 //PST
+#define DST_MN  60 //Summer time DST
+#define T_MN  ((TZ)*60)
+#define TZ_SEC ((TZ)*3600)
+#define DST_SEC ((DST_MN)*60) 
 
 #define MSEC_IN_SEC 1000
 #define MSEC_IN_MIN 60000
@@ -26,41 +38,19 @@ int get_m(long*);
 int get_se(long*);
 void modify_by_mode();
 void create_neopixel_chain(int, int, int);
-void modify_time();
+void modify_utime();
 void modify_brightness();
 void modify_color();
+void show_error();
 uint8_t Red(uint32_t color);
 uint8_t Green(uint32_t color);
 uint8_t Blue(uint32_t color);
 uint32_t DimBackgroundColor(uint32_t color);
 
-
-
 /**********************************
-* NeoPixel Setup
+* Strip Setup
 **********************************/
-
-Adafruit_NeoPixel strip = Adafruit_NeoPixel(STRIP_LEN, LIGHT_PIN, NEO_GRB + NEO_KHZ800);
-
-//uint32_t magenta = strip.Color(0, 100, 150); //Active color These should both be temporary until we have wheel
-uint32_t teal = Wheel( 150 );
-uint32_t orange = Wheel( 15 ); //Background color for off places
-uint32_t green = Wheel(85); //Seperator
-
-unsigned short time_wheel_pos = 150;
-unsigned short background_wheel_pos = 15;
-unsigned short seperator_wheel_pos = 85;
-
-uint32_t time_color = teal;
-uint32_t background_color = orange;
-uint32_t seperator_color = green;
-
-uint32_t yellow = strip.Color(255, 100, 0);
-uint32_t blue = strip.Color(0, 0, 255);
-uint32_t off = strip.Color(0, 0, 0);
-
-unsigned long time; //Worried about overflow
-unsigned short bright;
+Adafruit_NeoPixel strip = Adafruit_NeoPixel(STRIP_LEN, LIGHT_PIN, NEO_GRB + NEO_KHZ400);
 
 /**********************************
 * Wheel Setup
@@ -83,6 +73,60 @@ uint32_t Wheel(byte WheelPos){
 }
 
 /**********************************
+* NeoPixel Setup
+**********************************/
+
+
+
+//uint32_t magenta = strip.Color(0, 100, 150); //Active color These should both be temporary until we have wheel
+uint32_t teal = Wheel( 150 );
+uint32_t orange = Wheel( 15 ); //Background color for off places
+uint32_t green = Wheel(85); //Seperator
+
+unsigned short utime_wheel_pos = 150;
+unsigned short background_wheel_pos = 15;
+unsigned short seperator_wheel_pos = 85;
+
+uint32_t utime_color = teal;
+uint32_t background_color = orange;
+uint32_t seperator_color = green;
+
+uint32_t red = strip.Color(255,0,0);
+uint32_t yellow = strip.Color(255, 100, 0);
+uint32_t blue = strip.Color(0, 0, 255);
+uint32_t off = strip.Color(0, 0, 0);
+
+timeval tv;
+timespec tp;
+time_t now;
+timeval cbtime;      // time set in callback
+
+unsigned short bright;
+
+/**********************************
+* Setup time callback
+**********************************/
+void time_is_set(void) {
+  gettimeofday(&cbtime, NULL);
+  Serial.println("------------------ settimeofday() was called ------------------");
+}
+
+/**********************************
+* Testing functions
+**********************************/
+#define PTM(w) \
+  Serial.print(":" #w "="); \
+  Serial.print(tm->tm_##w);
+
+void printTm(const char* what, const tm* tm) {
+  Serial.print(what);
+  PTM(isdst); PTM(yday); PTM(wday);
+  PTM(year);  PTM(mon);  PTM(mday);
+  PTM(hour);  PTM(min);  PTM(sec);
+  Serial.println("");
+}
+
+/**********************************
 * State Machine
 **********************************/
 enum { PRESS, UNPRESS };
@@ -91,15 +135,13 @@ int state_color[STATE_END] = { off, green, yellow, blue, orange, teal };
 int mode = CLOCK;
 int mode_button_state = UNPRESS;
 unsigned long adjust = 0; 
+
 void setup(){
   /********************
   * Setup Pins
   ********************/
   pinMode(LIGHT_PIN, OUTPUT);
-  pinMode(ADJUST_PIN, INPUT);
-  pinMode(MODE_PIN, INPUT);
-  digitalWrite(ADJUST_PIN, HIGH); //Internal pull up
-  digitalWrite(MODE_PIN, HIGH);
+
   
   /********************
   * Setup Neopixels
@@ -108,78 +150,44 @@ void setup(){
   strip.begin();
   strip.show(); //Initialize everything off
   strip.setBrightness(bright); //Current limiting
-  Serial.begin(9600);
-  //delay(3000); //Wait for timer to get going?
-}
-void loop(){
+  Serial.begin(115200);
+
+  /********************
+  * Setup Wifi and Time
+  ********************/
+  settimeofday_cb(time_is_set);
+  configTime(TZ_SEC, DST_SEC, "pool.ntp.org");
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(SSID, SSIDPWD);
   
+}
+
+void loop(){  
   int sec;
   int m;
   int h;
-  static boolean blnk = 0; //Blnk counter
-  blnk = !blnk; //Blink it
-  //if(!digitalRead(ADJUST_PIN)){//Active low
-  //  adjust = adjust + 60000;
-  //}
-  //Get the time in msec
-  time = millis(); //Overflows after 50 days :(
-  time = time + adjust;
+  struct tm * timeinfo;
+
+  /********************
+  * Get time from internet
+  ********************/
+  gettimeofday(&tv, NULL);
+  now =time(NULL);
+  timeinfo = localtime(&now);
+  h = timeinfo->tm_hour;
+  m = timeinfo->tm_min;
+  sec = timeinfo->tm_sec;
+  //Serial.println(ctime(&now));
   
-  //Serial.println(time);
-  h = get_h(&time);
-  m = get_m(&time);
-  sec = get_sec(&time);
-  //Serial.println(h);
-  //Serial.println(m);
-  //Serial.println(sec);
-  //Serial.println();
-  //Serial.println();
-  if(!digitalRead(MODE_PIN)){//Active Low //Works but poorly, should be made to interrupt
-    if(mode_button_state == UNPRESS){
-      mode = mode + 1;
-      mode_button_state = PRESS;
-      if(mode >= STATE_END){ mode = CLOCK; }
-    }
-  } else {
-    mode_button_state = UNPRESS;
-  }
-  
-  
-  
-  
+  /********************
+  * Populate strip
+  ********************/
   strip.clear();
   create_neopixel_chain(h,m,sec);
-  if(DEBUGGING){
-      strip.setPixelColor(DEBUG_MODE_LED, state_color[mode]);
-  }
-  modify_by_mode(blnk);
-  
+  if(WiFi.status() != WL_CONNECTED){ show_error(); }
   strip.show();
   delay(100); //Can save power here but probably need to wake up more than once per second.
   
-}
-
-int get_h( unsigned long* time){
-  int h = *time / (MSEC_IN_HOUR);
-  *time = *time - (h * MSEC_IN_HOUR);
-  while( h >= 24 ) {
-    h = h - 24; //Wrap around
-  }
-  return h;
-}
-
-int get_m(unsigned long* time){
-  int m = *time / (MSEC_IN_MIN);
-  //Serial.print("Minute: ");
-  //Serial.println(m);
-  *time = *time - (m * MSEC_IN_MIN);
-  return m;
-}
-
-int get_sec(unsigned long* time){
-  int sec = *time / (MSEC_IN_SEC );
-  *time = *time - (sec * MSEC_IN_SEC);
-  return sec;
 }
 
 void create_neopixel_chain(int h, int m, int sec){
@@ -201,13 +209,10 @@ void add_seperators(){
 }
 
 void add_h(int h){
-  //boolean leds[5];
-  //memset(leds, 0, sizeof(leds));
   for(int i = 4; i >=0; i--){
     if( h >= (1 << i) ){
       h = h - ( 1<< i );
-      //leds[i] = 1;
-      strip.setPixelColor((i + HOUR_SHIFT), time_color);
+      strip.setPixelColor((i + HOUR_SHIFT), utime_color);
     } else {
       strip.setPixelColor(( i + HOUR_SHIFT), DimBackgroundColor(background_color));
     }
@@ -216,13 +221,10 @@ void add_h(int h){
 }
 
 void add_m(int m){
-  //boolean leds[6];
-  //memset(leds, 0, sizeof(leds));
   for(int i = 5; i >=0; i--){
     if( m >= (1 << i) ){
       m = m - ( 1<< i );
-      //leds[i] = 1;
-      strip.setPixelColor((i + MIN_SHIFT), time_color);
+      strip.setPixelColor((i + MIN_SHIFT), utime_color);
     } else {
       strip.setPixelColor(( i + MIN_SHIFT), DimBackgroundColor(background_color));
     }
@@ -230,70 +232,25 @@ void add_m(int m){
 }
 
 void add_second(int sec){
-  //boolean leds[6];
-  //memset(leds, 0, sizeof(leds));
   for(int i = 5; i >=0; i--){
     if( sec >= (1 << i) ){
       sec = sec - ( 1<< i );
-      //leds[i] = 1;
-      strip.setPixelColor((i + SEC_SHIFT), time_color);
+      strip.setPixelColor((i + SEC_SHIFT), utime_color);
     } else {
       strip.setPixelColor(( i + SEC_SHIFT), DimBackgroundColor(background_color));
     }
   }
 }
 
-void modify_by_mode(boolean blnk){
-  switch(mode){
-    case CLOCK:
-      break;
-    case UPDATE_HOUR:
-    case UPDATE_MIN:
-    case UPDATE_SEC:
-      modify_time(blnk);
-      break;
-    case UPDATE_BRIGHTNESS:
-      modify_brightness();
-      break;
-    case UPDATE_COLOR:
-      modify_color();
-      break;
-  }
-}
-
-void modify_time(boolean b){
-  static boolean adjust_pressed = UNPRESS;
-  blink_section(b);
-  if(!digitalRead(ADJUST_PIN)){
-    if( adjust_pressed == UNPRESS ){    
-      switch( mode ){
-        case UPDATE_HOUR:
-          adjust += MSEC_IN_HOUR;
-          break;
-        case UPDATE_MIN:
-          adjust += MSEC_IN_MIN;
-          break;
-        case UPDATE_SEC:
-          adjust += MSEC_IN_SEC;
-          break;
-        default://This shouldn't happen it wouldn't make any sense
-        break;
-      }
-    }
-    adjust_pressed = PRESS;
-  } else {
-    adjust_pressed = UNPRESS;
-  }
-}
 
 /*Assumes starting colors are nicely spaced on the color wheel*/
 void modify_color(){
   if(!digitalRead(ADJUST_PIN)){
-    time_wheel_pos++;
+    utime_wheel_pos++;
     background_wheel_pos++;
     seperator_wheel_pos++;
-    if(time_wheel_pos > WHEEL_MAX){
-      time_wheel_pos = 0;
+    if(utime_wheel_pos > WHEEL_MAX){
+      utime_wheel_pos = 0;
     }
     if(background_wheel_pos > WHEEL_MAX){
       background_wheel_pos = 0;
@@ -301,36 +258,15 @@ void modify_color(){
     if( seperator_wheel_pos > WHEEL_MAX){
       seperator_wheel_pos = 0;
     }
-    time_color = Wheel(time_wheel_pos);
+    utime_color = Wheel(utime_wheel_pos);
     background_color = Wheel(background_wheel_pos);
     seperator_color = Wheel(seperator_wheel_pos);
   } 
 }
 
-void blink_section(boolean b){
-  int i;
-  if(b){
-    switch( mode ){
-      case UPDATE_HOUR:
-        for( i = HOUR_SHIFT; i < MIN_SHIFT-1; i++){
-          strip.setPixelColor(i, off);
-        }
-        break;
-      case UPDATE_MIN:
-        for( i = MIN_SHIFT; i < SEC_SHIFT-1; i++){
-          strip.setPixelColor(i, off);
-        }
-        break;
-      case UPDATE_SEC:
-        for( i = SEC_SHIFT; i < SEC_SHIFT + 7; i++){
-          strip.setPixelColor(i,off);
-        }
-        break;
-      default:
-        break;
-      //Shouldn't ever happen. This would be confusing
-    }
-  }
+void show_error(){
+  #define ERR_LED 20
+  strip.setPixelColor( ERR_LED, red);
 }
 
 /*Consider using DimColor function. Haven't looked for it in code but adafruit mentions it*/
